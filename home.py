@@ -1,7 +1,3 @@
-import streamlit as st
-from openai import OpenAI
-from dotenv import load_dotenv
-
 import json
 
 import streamlit as st
@@ -16,16 +12,37 @@ from criteria import (
     ProjectBrief,
     validate,
 )
+from matrix_view import render_risk_matrix
 
 st.set_page_config(page_title="Delivery Method Selector", page_icon="🏗️", layout="centered")
 
 st.title("🏗️ Project Delivery Method Selector")
 st.caption(
-    "Step 1 of 3: tell us about your project's key objectives. "
+    "Step 1 of 3: tell us about your project's key objectives, then generate a risk matrix. "
     "This tool is an educational aid and is not legal advice."
 )
 
-# Keep the submitted answers across Streamlit reruns.
+if "openai_api_key" not in st.session_state:
+    st.session_state.openai_api_key = None
+
+def render_api_key_input():
+    st.sidebar.header("Setup")
+    api_key_input = st.sidebar.text_input("Enter your OpenAI API key:", type="password")
+    update_button = st.sidebar.button("Update API Key")
+    return api_key_input, update_button
+
+api_key_input, update_button = render_api_key_input()
+if update_button:
+    if api_key_input.strip():
+        st.session_state.openai_api_key = api_key_input.strip()
+    else:
+        st.sidebar.error("Please enter an API key first.")
+if st.session_state.openai_api_key:
+    st.sidebar.success("API key set for this session.")
+else:
+    st.sidebar.info("Your key is needed for Step 2 (risk matrix).")
+# ---------------------------------------------------------------------------
+
 if "brief" not in st.session_state:
     st.session_state.brief = None
 
@@ -118,11 +135,5 @@ if brief is not None:
         mime="application/json",
     )
 
-if "openai_api_key" not in st.session_state:
-    st.session_state.openai_api_key = None
-
-def render_api_key_input():
-    st.sidebar.header("Setup")
-    api_key_input = st.sidebar.text_input("Enter your OpenAI API key:", type="password")
-    update_button = st.sidebar.button("Update API Key")
-    return api_key_input, update_button
+    st.divider()
+    render_risk_matrix(brief)
