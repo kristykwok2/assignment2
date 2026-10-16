@@ -1,17 +1,29 @@
+"""Step 2: use an OpenAI model to weight the criteria and score each delivery method, then
+compute the weighted risk totals in plain Python.
+
+Design choice: the AI makes the *judgements* (weights, per-cell risk ratings and
+reasons). The *arithmetic* (weighted totals, ranking) is done in code so it is
+reproducible and checkable.
+
+No Streamlit imports here, so this module can be unit-tested on its own.
+"""
+
 import json
 from typing import Literal
 
 import pandas as pd
-from openai import OpenAI
 from pydantic import BaseModel, Field, model_validator
 
+from ai_client import structured_call
 from methods import CRITERIA, DELIVERY_METHODS
 
-MODEL = "gpt-4o-mini"
-MAX_ATTEMPTS = 2
-
+# Structured Outputs doesn't accept min/max constraints, so 1-5 is expressed as a Literal.
 Score = Literal[1, 2, 3, 4, 5]
 
+
+# ---------------------------------------------------------------------------
+# Schema the AI must return (also used to validate its output)
+# ---------------------------------------------------------------------------
 class CriterionWeight(BaseModel):
     criterion: str
     weight: Score = Field(description="1 = minor importance, 5 = critical to this project")
@@ -45,6 +57,10 @@ class RiskMatrix(BaseModel):
             raise ValueError("cells must contain exactly one entry for every method x criterion pair")
         return self
 
+
+# ---------------------------------------------------------------------------
+# Prompting
+# ---------------------------------------------------------------------------
 SYSTEM_PROMPT = """You are assisting with an educational tool that helps choose a project \
 delivery method for an Australian construction project. You are not giving legal advice.
 
@@ -77,39 +93,24 @@ def build_user_message(brief: dict) -> str:
         + "\n\nReturn the weights, one risk cell per method x criterion pair, and the caveats."
     )
 
+
+# ---------------------------------------------------------------------------
+# API call
+# ---------------------------------------------------------------------------
 def generate_risk_matrix(brief: dict, api_key: str) -> RiskMatrix:
-    client = OpenAI(api_key=api_key)
+    """Ask the model for weights + scores (AI call 3).
 
-    last_error = None
-    for _ in range(MAX_ATTEMPTS):
-        message = build_user_message(brief)
-        if last_error:
-            message += f"\n\nYour previous answer was rejected: {last_error}. Fix this and resubmit."
+    The schema forces the reply into a RiskMatrix, and our validator checks that every
+    method x criterion pair is present exactly once. A bad reply is retried once.
+    """
+    return structured_call(
+        api_key, SYSTEM_PROMPT, build_user_message(brief), RiskMatrix, max_tokens=8000
+    )
 
-        try:
-            completion = client.chat.completions.parse(
-                model=MODEL,
-                max_completion_tokens=8000,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": message},
-                ],
-                response_format=RiskMatrix,
-            )
-        except ValueError as exc: 
-            last_error = str(exc)
-            continue
 
-        reply = completion.choices[0].message
-        if reply.refusal:
-            raise RuntimeError(f"The model declined to answer: {reply.refusal}")
-        if reply.parsed is None:
-            last_error = "no structured answer returned"
-            continue
-        return reply.parsed
-
-    raise RuntimeError(f"Could not get a valid risk matrix from the AI: {last_error}")
-
+# ---------------------------------------------------------------------------
+# Scoring (pure Python/pandas - no AI)
+# ---------------------------------------------------------------------------
 def build_tables(matrix: RiskMatrix) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
     """Return (risk grid, weights, weighted risk per method sorted best->worst).
 

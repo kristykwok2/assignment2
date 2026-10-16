@@ -1,13 +1,12 @@
-"""Streamlit display for Step 2 (risk matrix)."""
+"""Streamlit display for Step 3 (risk matrix)."""
 
 import json
 
 import pandas as pd
 import streamlit as st
 
+from export import RISK_PALETTE as _PALETTE
 from risk_matrix import RiskMatrix, build_tables, generate_risk_matrix
-
-_PALETTE = {1: "#c8e6c9", 2: "#e6f2c2", 3: "#fff3b0", 4: "#ffd699", 5: "#f4a6a6"}
 
 
 def _colour(value: float) -> str:
@@ -34,7 +33,7 @@ def _matrix_table(matrix: RiskMatrix):
 
 
 def render_risk_matrix(brief) -> None:
-    st.header("Step 2: Risk matrix")
+    st.header("Step 3: Risk matrix")
 
     brief_dict = brief.to_dict()
     brief_key = json.dumps(brief_dict, sort_keys=True)

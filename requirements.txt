@@ -1,3 +1,4 @@
 openai
 streamlit
 chromadb
+python-docx>=1.1

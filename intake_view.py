@@ -1,0 +1,227 @@
+"""Streamlit sections for Step 1 (your project) and Step 2 (check your answers)."""
+
+import json
+from dataclasses import fields
+
+import streamlit as st
+
+from criteria import (
+    COMPLEXITY,
+    COMPLEXITY_DRIVERS,
+    CONTROL,
+    EXPERIENCE,
+    IMPORTANCE,
+    STAKEHOLDER_TYPES,
+    ProjectBrief,
+    validate,
+)
+from intake_ai import extract_brief, intake_to_brief, review_brief
+from ui_common import cached, get_api_key, make_key, store
+
+BRIEF_FIELDS = [f.name for f in fields(ProjectBrief)]
+
+
+def _key(name: str) -> str:
+    """Session-state key of the form widget for a ProjectBrief field."""
+    return f"in_{name}"
+
+
+def _init_defaults() -> None:
+    # Giving every widget a session-state key lets the AI fill them in (AI call 1).
+    for name, value in ProjectBrief().to_dict().items():
+        st.session_state.setdefault(_key(name), value)
+
+
+def _fill_from_description() -> None:
+    """AI call 1: read the free-text description and set the form widgets."""
+    description = st.session_state.get("project_description", "").strip()
+    if not description:
+        st.warning("Write a short description of your project first.")
+        return
+    api_key = get_api_key()
+    if not api_key:
+        return
+    with st.spinner("Reading your description..."):
+        try:
+            result = extract_brief(description, api_key)
+        except Exception as exc:
+            st.error(f"Something went wrong filling in the form: {exc}")
+            return
+
+    # This runs before the form widgets are created in this script run, so setting
+    # their session-state values here is allowed and they will show the new answers.
+    for name, value in intake_to_brief(result).to_dict().items():
+        st.session_state[_key(name)] = value
+    st.session_state.brief = None  # the user must check and save the new answers
+    st.session_state.intake_notes = list(result.assumptions)
+
+
+def render_intake() -> ProjectBrief | None:
+    """Step 1. Returns the saved ProjectBrief, or None if the user hasn't saved answers yet."""
+    st.header("Step 1: Your project")
+    _init_defaults()
+    if "brief" not in st.session_state:
+        st.session_state.brief = None
+
+    with st.expander("Shortcut: describe your project and let AI fill in the form", expanded=True):
+        st.text_area(
+            "Describe your project in a few sentences",
+            key="project_description",
+            height=130,
+            placeholder=(
+                "e.g. A council wants a new $25m community aquatic centre. It must open before "
+                "summer 2028, the budget is capped by a state grant, and residents and the "
+                "funding body will both want a say. The council has built little before."
+            ),
+        )
+        if st.button("Fill in the form for me"):
+            _fill_from_description()
+
+    notes = st.session_state.get("intake_notes")
+    if notes is not None:
+        if notes:
+            st.info(
+                "The AI filled in the form below. **Please check it before saving.** "
+                "It had to assume:\n" + "\n".join(f"- {n}" for n in notes)
+            )
+        else:
+            st.info("The AI filled in the form below. Please check the answers before saving.")
+
+    with st.form("objectives_form"):
+        # 1. TIMING -----------------------------------------------------------
+        st.subheader("1. Timing")
+        st.select_slider(
+            "How important is early or on-time completion?",
+            options=IMPORTANCE,
+            key=_key("timing_importance"),
+        )
+        st.checkbox(
+            "There is a fixed or non-negotiable completion date", key=_key("fixed_completion_date")
+        )
+        st.checkbox(
+            "Construction could start before the design is fully complete (fast-tracking)",
+            key=_key("fast_track_acceptable"),
+        )
+
+        # 2. COST -------------------------------------------------------------
+        st.subheader("2. Cost")
+        st.select_slider(
+            "How important is price certainty before construction starts?",
+            options=IMPORTANCE,
+            key=_key("cost_certainty_importance"),
+        )
+        st.checkbox("The budget is fixed (e.g. capped funding)", key=_key("budget_fixed"))
+        st.checkbox(
+            "Achieving the lowest competitive price is a priority", key=_key("lowest_price_priority")
+        )
+
+        # 3. CONTROL OVER DESIGN ----------------------------------------------
+        st.subheader("3. Control over design")
+        st.select_slider(
+            "How much control do you want over design details?",
+            options=CONTROL,
+            key=_key("design_control_desired"),
+        )
+        st.checkbox(
+            "Significant design changes are expected during delivery",
+            key=_key("design_changes_expected"),
+        )
+
+        # 4. EXPERIENCE OF THE PRINCIPAL --------------------------------------
+        st.subheader("4. Experience of the principal")
+        st.select_slider(
+            "How experienced is the principal with construction projects?",
+            options=EXPERIENCE,
+            key=_key("principal_experience"),
+        )
+        st.checkbox(
+            "The principal has in-house project management / technical capability",
+            key=_key("in_house_project_management"),
+        )
+
+        # 5. OTHER STAKEHOLDERS -----------------------------------------------
+        st.subheader("5. Other stakeholders")
+        st.multiselect(
+            "Which other stakeholders have an interest in the project?",
+            STAKEHOLDER_TYPES,
+            key=_key("stakeholder_types"),
+        )
+        st.text_area(
+            "Anything else about stakeholder requirements? (optional)",
+            placeholder="e.g. lender requires fixed-price contract; council needs staged handover",
+            key=_key("stakeholder_notes"),
+        )
+
+        # 6. PROJECT COMPLEXITY -----------------------------------------------
+        st.subheader("6. Project complexity")
+        st.select_slider("Overall project complexity", options=COMPLEXITY, key=_key("complexity_level"))
+        st.multiselect(
+            "What contributes to the complexity?",
+            COMPLEXITY_DRIVERS,
+            key=_key("complexity_drivers"),
+        )
+
+        submitted = st.form_submit_button("Save my answers", type="primary")
+
+    if submitted:
+        values = {}
+        for name in BRIEF_FIELDS:
+            value = st.session_state[_key(name)]
+            values[name] = list(value) if isinstance(value, list) else value
+        st.session_state.brief = ProjectBrief(**values)
+
+    brief = st.session_state.brief
+    if brief is not None:
+        st.success("Answers saved.")
+        with st.expander("Your saved answers", expanded=False):
+            st.json(brief.to_dict())
+            st.download_button(
+                "Download answers (JSON)",
+                data=json.dumps(brief.to_dict(), indent=2),
+                file_name="project_brief.json",
+                mime="application/json",
+            )
+    return brief
+
+
+def render_review(brief: ProjectBrief) -> None:
+    """Step 2. Rule-based warnings, plus an AI review (AI call 2) on request."""
+    st.header("Step 2: Check your answers")
+
+    for problem in validate(brief):
+        st.warning(problem)
+
+    brief_dict = brief.to_dict()
+    key = make_key(brief_dict)
+
+    if st.button("Review my answers with AI"):
+        api_key = get_api_key()
+        if api_key:
+            with st.spinner("Reviewing your answers..."):
+                try:
+                    store("review", key, review_brief(brief_dict, api_key))
+                except Exception as exc:
+                    st.error(f"Something went wrong reviewing your answers: {exc}")
+
+    review = cached("review", key)
+    if review is None:
+        st.caption(
+            "Optional: the AI checks your answers for contradictions and gaps before you build the matrix."
+        )
+        return
+
+    st.write(review.summary)
+    for issue in review.issues:
+        text = f"**{issue.kind}:** {issue.message}\n\n*Suggestion:* {issue.suggestion}"
+        if issue.kind == "Note":
+            st.info(text)
+        else:
+            st.warning(text)
+    if not review.issues:
+        st.success("No problems found.")
+    if review.clarifying_questions:
+        st.markdown("**Questions worth thinking about**")
+        for question in review.clarifying_questions:
+            st.markdown(f"- {question}")
+    if review.issues or review.clarifying_questions:
+        st.caption("To change an answer, edit the form in Step 1 and save again.")
