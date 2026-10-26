@@ -52,20 +52,20 @@ def render_advice(brief, matrix: RiskMatrix) -> None:
         st.caption("Click the button to get a ranked recommendation and notes on the contract.")
         return
 
-    rec_key = make_key(ctx, rec.model_dump())  # changes if the recommendation is regenerated
+    rec_key = make_key(ctx, rec.model_dump())
     top_method = rec.ranked[0].method
 
     st.markdown(f"### {rec.headline}")
     for i, ranked in enumerate(rec.ranked, start=1):
-        with st.container(border=True):
-            st.markdown(f"**{i}. {ranked.method}**")
+        label = f"{i}. {ranked.method}" + ("  (recommended)" if i == 1 else "")
+        with st.expander(label, expanded=False):
             st.write(ranked.why_it_suits)
-            st.caption(f"Main drawback: {ranked.main_drawback}")
-
-    st.markdown("**What decided it**")
-    for factor in rec.deciding_factors:
-        st.markdown(f"- {factor}")
-    st.caption(rec.matrix_alignment_note)
+            st.write(f":warning: {ranked.main_drawback}")
+            if i == 1:  
+                st.markdown("**What decided it**")
+                for factor in rec.deciding_factors:
+                    st.markdown(f"- {factor}")
+                st.caption(rec.matrix_alignment_note)
 
     notes = cached("contract_notes", rec_key)
     if notes is None:
@@ -75,7 +75,7 @@ def render_advice(brief, matrix: RiskMatrix) -> None:
                 _generate_notes(brief_dict, matrix, top_method, api_key, rec_key)
                 st.rerun()
     else:
-        with st.expander(f"Contract notes: {notes.method}", expanded=True):
+        with st.expander(f"Contract notes: {notes.method}", expanded=False):
             st.markdown("**Standard forms**")
             for form in notes.standard_forms:
                 st.markdown(f"- {form}")
@@ -98,30 +98,38 @@ def render_advice(brief, matrix: RiskMatrix) -> None:
         "control? What would change if the budget weren't fixed?"
     )
 
-    history = cached("chat", rec_key) or []
-    for message in history:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    # Two containers fix the on-screen order: the conversation first, the question box under
+    # it. st.chat_input is only pinned to the bottom of the screen when it sits directly on
+    # the page; inside a container it stays here, under the Step 5 heading.
+    conversation_box = st.container()
+    input_box = st.container()
+    with input_box:
+        question = st.chat_input("Type your question here and press Enter...")
 
-    question = st.chat_input("Ask a question about your results...")
-    if question:
-        api_key = get_api_key()
-        if api_key:
-            new_history = history + [{"role": "user", "content": question}]
-            with st.chat_message("user"):
-                st.markdown(question)
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    try:
-                        answer = answer_question(  # AI call 9
-                            brief_dict, matrix, rec, notes, new_history, api_key
-                        )
-                    except Exception as exc:
-                        answer = None
-                        st.error(f"Something went wrong answering that: {exc}")
-                if answer:
-                    st.markdown(answer)
-                    store("chat", rec_key, new_history + [{"role": "assistant", "content": answer}])
+    history = cached("chat", rec_key) or []
+    with conversation_box:
+        for message in history:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+        if question:
+            api_key = get_api_key()
+            if api_key:
+                new_history = history + [{"role": "user", "content": question}]
+                with st.chat_message("user"):
+                    st.markdown(question)
+                with st.chat_message("assistant"):
+                    with st.spinner("Thinking..."):
+                        try:
+                            answer = answer_question(  # AI call 9
+                                brief_dict, matrix, rec, notes, new_history, api_key
+                            )
+                        except Exception as exc:
+                            answer = None
+                            st.error(f"Something went wrong answering that: {exc}")
+                    if answer:
+                        st.markdown(answer)
+                        store("chat", rec_key, new_history + [{"role": "assistant", "content": answer}])
 
     # ===== Step 6: download summary ==========================================
     st.divider()
