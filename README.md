@@ -1,6 +1,7 @@
 #README
 
 ##Project URL
+https://assignment2-6cq8vn5aqhnysqgfvgrtbm.streamlit.app/
 
 ##3x test cases
 
