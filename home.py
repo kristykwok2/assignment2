@@ -4,9 +4,11 @@ Run locally with:  streamlit run home.py
 
 Flow (each step builds on the one before):
   1. Your project        - describe it for an AI form fill (AI call 1), then save your answers
-  2. Check your answers  - AI review for contradictions and gaps (AI call 2)
-  3. Risk matrix         - AI weights the objectives and rates each method (AI call 3)
-  4. Recommendation      - ranked recommendation (AI call 5) + contract notes (AI call 6)
+  2. Check your answers  - AI review runs automatically on save (AI call 2)
+  3. Risk matrix         - AI weights and rates each method (call 3), then an automatic
+                           second-opinion check of the ratings (call 4)
+  4. Recommendation      - ranked recommendation (call 5), contract notes (call 6) and
+                           risk mitigation ideas (call 7)
   5. Ask a question      - follow-up Q&A about the results (AI call 9)
   6. Download a summary  - one-page summary as Word/HTML/Markdown (AI call 10)
 """

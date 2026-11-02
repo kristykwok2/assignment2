@@ -194,19 +194,31 @@ def render_review(brief: ProjectBrief) -> None:
     brief_dict = brief.to_dict()
     key = make_key(brief_dict)
 
-    if st.button("Review my answers with AI"):
-        api_key = get_api_key()
-        if api_key:
-            with st.spinner("Reviewing your answers..."):
-                try:
-                    store("review", key, review_brief(brief_dict, api_key))
-                except Exception as exc:
-                    st.error(f"Something went wrong reviewing your answers: {exc}")
-
+    # AI call 2 runs by itself whenever there are saved answers it hasn't reviewed yet.
+    # A failure is remembered for these answers so the page doesn't retry on every click;
+    # the user retries with the button instead.
     review = cached("review", key)
+    failure = cached("review_error", key)
+    retry = st.button("Try the AI review again") if failure else False
+
+    if review is None and (failure is None or retry):
+        api_key = st.session_state.get("openai_api_key")
+        if not api_key:
+            st.info("Add your OpenAI API key in the sidebar and the AI will review your answers here.")
+            return
+        with st.spinner("Reviewing your answers..."):
+            try:
+                review = review_brief(brief_dict, api_key)
+                store("review", key, review)
+            except Exception as exc:
+                failure = str(exc)
+                store("review_error", key, failure)
+        if retry and review is not None:
+            st.rerun()  # redraw without the retry button
+
     if review is None:
-        st.caption(
-            "Optional: the AI checks your answers for contradictions and gaps before you build the matrix."
+        st.warning(
+            f"The AI review didn't work this time ({failure}). You can still continue to Step 3."
         )
         return
 

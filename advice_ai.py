@@ -1,7 +1,9 @@
 """AI calls that happen after the risk matrix exists.
 
+  Call 4 - generate_matrix_check:   independent second-opinion check of the matrix.
   Call 5 - generate_recommendation: ranked recommendation with trade-offs.
   Call 6 - generate_contract_notes: contract/risk-allocation notes for the top method.
+  Call 7 - generate_mitigation:     ways to reduce the top method's highest risks.
   Call 9 - answer_question:         follow-up Q&A about the results.
   Call 10 - generate_summary:       one-page plain-English summary for download.
 
@@ -15,8 +17,8 @@ import json
 from pydantic import BaseModel, Field, model_validator
 
 from ai_client import chat_call, structured_call
-from methods import DELIVERY_METHODS
-from risk_matrix import RiskMatrix, build_tables
+from methods import CRITERIA, DELIVERY_METHODS
+from risk_matrix import RiskMatrix, Score, build_tables
 
 DISCLAIMER = (
     "AI-generated educational analysis. It is not legal advice and should be checked against "
@@ -68,6 +70,71 @@ def highest_risk_criteria(matrix: RiskMatrix, method: str, n: int = 2) -> list[t
     risk, _, _ = build_tables(matrix)
     row = risk.loc[method].sort_values(ascending=False, kind="stable")
     return [(criterion, int(value)) for criterion, value in row.head(n).items()]
+
+
+# ---------------------------------------------------------------------------
+# Call 4: second-opinion check of the matrix
+# ---------------------------------------------------------------------------
+class RatingFlag(BaseModel):
+    method: str
+    criterion: str
+    suggested_risk: Score = Field(
+        description="The rating you think is more accurate: 1 = very low risk, 5 = very high risk"
+    )
+    concern: str = Field(description="One sentence on why the current rating looks wrong")
+
+
+class MatrixCheck(BaseModel):
+    verdict: str = Field(
+        description="One or two sentences: overall, do the weights and ratings fit the user's answers?"
+    )
+    flags: list[RatingFlag] = Field(
+        description="Zero to four individual ratings that look wrong. Empty if the matrix looks reasonable."
+    )
+
+    @model_validator(mode="after")
+    def _check_flags(self):
+        if len(self.flags) > 4:
+            raise ValueError("return at most four flags")
+        for flag in self.flags:
+            if flag.method not in DELIVERY_METHODS:
+                raise ValueError(f"unknown method {flag.method!r}. Use exactly: {list(DELIVERY_METHODS)}")
+            if flag.criterion not in CRITERIA:
+                raise ValueError(f"unknown criterion {flag.criterion!r}. Use exactly: {list(CRITERIA)}")
+        return self
+
+
+CHECK_SYSTEM = f"""You are an independent reviewer. A different AI produced a risk matrix for a \
+principal's Australian construction project, and you are given the matrix with its reasoning. \
+Check it against the user's answers. Do not redo it.
+
+Check that:
+1. The objective weights follow from the user's answers (for example, a fixed completion date \
+should not lead to a low weight for timing).
+2. Each risk rating is plausible for that method's general characteristics, and the ratings are \
+consistent with each other.
+3. Each rationale actually supports its rating (for example, a rationale describing likely cost \
+overruns should not sit beside a very low cost risk rating).
+
+Flag only ratings you would change by at least one point and can justify in one sentence. Return \
+at most four flags. If the matrix looks reasonable, return no flags and say so in the verdict. \
+Do not flag a rating just because you would have chosen differently by a small margin.
+
+{_COMMON_RULES}"""
+
+
+def generate_matrix_check(brief: dict, matrix: RiskMatrix, api_key: str) -> MatrixCheck:
+    """AI call 4: a separate model call that reviews the matrix against the user's answers."""
+    user = (
+        f"THE USER'S ANSWERS (JSON):\n{json.dumps(brief, indent=2)}\n\n"
+        f"DELIVERY METHODS:\n{methods_to_text()}\n\n"
+        f"{matrix_to_text(matrix, include_rationale=True)}"
+    )
+    check = structured_call(api_key, CHECK_SYSTEM, user, MatrixCheck, max_tokens=2500)
+    # Drop flags that agree with the matrix (the reviewer sometimes suggests the same number).
+    risk, _, _ = build_tables(matrix)
+    check.flags = [f for f in check.flags if int(risk.loc[f.method, f.criterion]) != f.suggested_risk]
+    return check
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +244,71 @@ def generate_contract_notes(brief: dict, matrix: RiskMatrix, method: str, api_ke
 
 
 # ---------------------------------------------------------------------------
+# Call 7: ways to reduce the top method's highest risks
+# ---------------------------------------------------------------------------
+class MitigationItem(BaseModel):
+    criterion: str
+    actions: list[str] = Field(description="Two or three practical actions, one short sentence each")
+
+
+class Mitigation(BaseModel):
+    method: str
+    items: list[MitigationItem]
+    residual_note: str = Field(description="One sentence on the risk that is likely to remain even so")
+
+    @model_validator(mode="after")
+    def _check_items(self):
+        seen = [i.criterion for i in self.items]
+        unknown = [c for c in seen if c not in CRITERIA]
+        if unknown or len(seen) != len(set(seen)):
+            raise ValueError(f"items must use each of these criteria at most once: {list(CRITERIA)}")
+        return self
+
+
+MITIGATION_SYSTEM = f"""You suggest practical ways for a principal to reduce the biggest risks of \
+a chosen project delivery method on an Australian construction project. You are given the method, \
+the user's answers, and the objectives where the risk matrix rated this method worst.
+
+Give one entry for each objective listed, using its exact name. Each action must be something \
+the principal can do: how the procurement or contract is set up, what to decide early, who to \
+involve, or how to govern the project. You may suggest borrowing a feature of another listed \
+delivery method, using its exact name. Tie actions to the user's answers where you can.
+
+{_COMMON_RULES}"""
+
+
+def generate_mitigation(brief: dict, matrix: RiskMatrix, method: str, api_key: str) -> Mitigation:
+    """AI call 7: mitigation ideas for the method's highest-risk objectives."""
+    focus = highest_risk_criteria(matrix, method, n=3)
+    focus_text = "\n".join(f"- {c} (rated {v}/5)" for c, v in focus)
+    user = (
+        f"METHOD: {method}\n"
+        f"METHOD DESCRIPTION: {DELIVERY_METHODS[method]}\n\n"
+        f"OBJECTIVES TO ADDRESS (worst first):\n{focus_text}\n\n"
+        f"OTHER DELIVERY METHODS:\n{methods_to_text()}\n\n"
+        f"THE USER'S ANSWERS (JSON):\n{json.dumps(brief, indent=2)}"
+    )
+    result = structured_call(api_key, MITIGATION_SYSTEM, user, Mitigation, max_tokens=2500)
+    result.method = method
+    # Keep only the objectives we asked about, in the order we asked.
+    by_criterion = {i.criterion: i for i in result.items}
+    result.items = [by_criterion[c] for c, _ in focus if c in by_criterion]
+    if not result.items:
+        raise RuntimeError("The AI did not give mitigation ideas for the requested objectives.")
+    return result
+
+
+def mitigation_to_text(mitigation: "Mitigation | None") -> str:
+    if mitigation is None:
+        return "(not generated)"
+    lines = [f"Method: {mitigation.method}"]
+    for item in mitigation.items:
+        lines.append(f"- {item.criterion}: " + " ".join(item.actions))
+    lines.append(mitigation.residual_note)
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Call 9: follow-up questions
 # ---------------------------------------------------------------------------
 CHAT_SYSTEM_TEMPLATE = """You answer follow-up questions from a principal about the results of an \
@@ -209,6 +341,9 @@ speaking to a construction lawyer.
 
 === CONTRACT NOTES ===
 {notes}
+
+=== RISK MITIGATION IDEAS ===
+{mitigation}
 """
 
 MAX_HISTORY_MESSAGES = 12
@@ -239,6 +374,7 @@ def answer_question(
     notes: ContractNotes | None,
     history: list[dict],
     api_key: str,
+    mitigation: "Mitigation | None" = None,
 ) -> str:
     """AI call 9: answer the latest user message in `history`."""
     system = CHAT_SYSTEM_TEMPLATE.format(
@@ -248,6 +384,7 @@ def answer_question(
         matrix=matrix_to_text(matrix, include_rationale=True),
         recommendation=recommendation_to_text(rec),
         notes=notes_to_text(notes),
+        mitigation=mitigation_to_text(mitigation),
     )
     return chat_call(api_key, system, history[-MAX_HISTORY_MESSAGES:])
 
@@ -280,13 +417,15 @@ def generate_summary(
     rec: Recommendation,
     notes: ContractNotes | None,
     api_key: str,
+    mitigation: "Mitigation | None" = None,
 ) -> Summary:
     """AI call 10: structured one-page summary."""
     user = (
         f"THE USER'S ANSWERS (JSON):\n{json.dumps(brief, indent=2)}\n\n"
         f"{matrix_to_text(matrix)}\n\n"
         f"RECOMMENDATION:\n{recommendation_to_text(rec)}\n\n"
-        f"CONTRACT NOTES:\n{notes_to_text(notes)}"
+        f"CONTRACT NOTES:\n{notes_to_text(notes)}\n\n"
+        f"RISK MITIGATION IDEAS:\n{mitigation_to_text(mitigation)}"
     )
     summary = structured_call(api_key, SUMMARY_SYSTEM, user, Summary, max_tokens=2500)
     summary.recommended_method = rec.ranked[0].method  # keep consistent with the recommendation

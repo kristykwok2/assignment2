@@ -6,11 +6,12 @@ from advice_ai import (
     DISCLAIMER,
     answer_question,
     generate_contract_notes,
+    generate_mitigation,
     generate_recommendation,
     generate_summary,
 )
 from export import build_blocks, to_docx, to_html, to_markdown
-from risk_matrix import RiskMatrix
+from risk_matrix import RiskMatrix, build_tables
 from ui_common import cached, get_api_key, make_key, store
 
 
@@ -21,6 +22,15 @@ def _generate_notes(brief_dict, matrix, method, api_key, rec_key) -> None:
             store("contract_notes", rec_key, generate_contract_notes(brief_dict, matrix, method, api_key))
         except Exception as exc:
             st.warning(f"The recommendation worked, but the contract notes failed: {exc}")
+
+
+def _generate_mitigation(brief_dict, matrix, method, api_key, rec_key) -> None:
+    """AI call 7, run for the top-ranked method."""
+    with st.spinner(f"Finding ways to reduce the main risks of {method}..."):
+        try:
+            store("mitigation", rec_key, generate_mitigation(brief_dict, matrix, method, api_key))
+        except Exception as exc:
+            st.warning(f"The recommendation worked, but the risk mitigation ideas failed: {exc}")
 
 
 def render_advice(brief, matrix: RiskMatrix) -> None:
@@ -42,30 +52,50 @@ def render_advice(brief, matrix: RiskMatrix) -> None:
                     st.error(f"Something went wrong generating the recommendation: {exc}")
             if new_rec is not None:
                 store("recommendation", ctx, new_rec)
-                _generate_notes(  # AI call 6
-                    brief_dict, matrix, new_rec.ranked[0].method, api_key,
-                    make_key(ctx, new_rec.model_dump()),
-                )
+                new_key = make_key(ctx, new_rec.model_dump())
+                top = new_rec.ranked[0].method
+                _generate_notes(brief_dict, matrix, top, api_key, new_key)  # AI call 6
+                _generate_mitigation(brief_dict, matrix, top, api_key, new_key)  # AI call 7
 
     rec = cached("recommendation", ctx)
     if rec is None:
         st.caption("Click the button to get a ranked recommendation and notes on the contract.")
         return
 
-    rec_key = make_key(ctx, rec.model_dump())
+    rec_key = make_key(ctx, rec.model_dump())  # changes if the recommendation is regenerated
     top_method = rec.ranked[0].method
 
+    mitigation = cached("mitigation", rec_key)
+
+    # Only the headline and the ranking show at first. Everything else opens on click.
     st.markdown(f"### {rec.headline}")
+    st.caption("Click a method to see why it suits you and its main drawback.")
     for i, ranked in enumerate(rec.ranked, start=1):
         label = f"{i}. {ranked.method}" + ("  (recommended)" if i == 1 else "")
         with st.expander(label, expanded=False):
             st.write(ranked.why_it_suits)
-            st.write(f":warning: {ranked.main_drawback}")
-            if i == 1:  
+            st.caption(f"Main drawback: {ranked.main_drawback}")
+            if i == 1:  # the deciding factors explain the top pick, so they live in its row
                 st.markdown("**What decided it**")
                 for factor in rec.deciding_factors:
                     st.markdown(f"- {factor}")
                 st.caption(rec.matrix_alignment_note)
+
+                st.markdown("**How to reduce its main risks**")
+                if mitigation is None:
+                    if st.button("Generate risk mitigation ideas"):  # only if the automatic call failed
+                        api_key = get_api_key()
+                        if api_key:
+                            _generate_mitigation(brief_dict, matrix, top_method, api_key, rec_key)
+                            st.rerun()
+                else:
+                    risk_grid = build_tables(matrix)[0]
+                    for item in mitigation.items:
+                        rating = int(risk_grid.loc[mitigation.method, item.criterion])
+                        st.markdown(f"*{item.criterion}* (rated {rating}/5)")
+                        for action in item.actions:
+                            st.markdown(f"- {action}")
+                    st.caption(mitigation.residual_note)
 
     notes = cached("contract_notes", rec_key)
     if notes is None:
@@ -122,7 +152,8 @@ def render_advice(brief, matrix: RiskMatrix) -> None:
                     with st.spinner("Thinking..."):
                         try:
                             answer = answer_question(  # AI call 9
-                                brief_dict, matrix, rec, notes, new_history, api_key
+                                brief_dict, matrix, rec, notes, new_history, api_key,
+                                mitigation=mitigation,
                             )
                         except Exception as exc:
                             answer = None
@@ -141,7 +172,9 @@ def render_advice(brief, matrix: RiskMatrix) -> None:
             with st.spinner("Writing your summary..."):
                 try:
                     store(  # AI call 10
-                        "summary", rec_key, generate_summary(brief_dict, matrix, rec, notes, api_key)
+                        "summary",
+                        rec_key,
+                        generate_summary(brief_dict, matrix, rec, notes, api_key, mitigation=mitigation),
                     )
                 except Exception as exc:
                     st.error(f"Something went wrong writing the summary: {exc}")
