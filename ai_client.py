@@ -11,8 +11,6 @@ Two kinds of call:
 
 from openai import OpenAI
 
-# Any chat model that supports Structured Outputs works here. Check OpenAI's current
-# model list and change this if your assignment names a specific model.
 MODEL = "gpt-4o-mini"
 
 
@@ -41,7 +39,7 @@ def structured_call(api_key: str, system: str, user: str, schema, max_attempts: 
                 ],
                 response_format=schema,
             )
-        except ValueError as exc:  # pydantic.ValidationError is a ValueError
+        except ValueError as exc:  
             last_error = str(exc)
             continue
 

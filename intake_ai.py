@@ -1,16 +1,8 @@
-"""AI calls that happen around the intake form.
-
-  Call 1 - extract_brief: turn a free-text project description into form answers.
-  Call 2 - review_brief:  check the saved answers for tensions, gaps and open questions.
-
-No Streamlit imports here, so this module can be unit-tested on its own.
-"""
-
 import json
 from dataclasses import fields
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from ai_client import structured_call
 from criteria import (
@@ -23,19 +15,13 @@ from criteria import (
     ProjectBrief,
 )
 
-# The option lists in criteria.py are the single source of truth. Turning them into
-# Literal types means the model can only return values the form actually offers.
-ImportanceT = Literal[tuple(IMPORTANCE)]  # type: ignore[valid-type]
-ControlT = Literal[tuple(CONTROL)]  # type: ignore[valid-type]
-ExperienceT = Literal[tuple(EXPERIENCE)]  # type: ignore[valid-type]
-ComplexityT = Literal[tuple(COMPLEXITY)]  # type: ignore[valid-type]
-StakeholderT = Literal[tuple(STAKEHOLDER_TYPES)]  # type: ignore[valid-type]
-DriverT = Literal[tuple(COMPLEXITY_DRIVERS)]  # type: ignore[valid-type]
+ImportanceT = Literal[tuple(IMPORTANCE)]  
+ControlT = Literal[tuple(CONTROL)] 
+ExperienceT = Literal[tuple(EXPERIENCE)]  
+ComplexityT = Literal[tuple(COMPLEXITY)]  
+StakeholderT = Literal[tuple(STAKEHOLDER_TYPES)]  
+DriverT = Literal[tuple(COMPLEXITY_DRIVERS)] 
 
-
-# ---------------------------------------------------------------------------
-# Call 1: free text -> form answers
-# ---------------------------------------------------------------------------
 class IntakeResult(BaseModel):
     """Mirrors ProjectBrief field-for-field, plus a list of assumptions."""
 
@@ -93,41 +79,34 @@ def intake_to_brief(result: IntakeResult) -> ProjectBrief:
     """Copy the form-answer fields of an IntakeResult into a ProjectBrief."""
     return ProjectBrief(**{f.name: getattr(result, f.name) for f in fields(ProjectBrief)})
 
-
-# ---------------------------------------------------------------------------
-# Call 2: review of the saved answers
-# ---------------------------------------------------------------------------
-class AnswerIssue(BaseModel):
-    kind: Literal["Inconsistency", "Gap", "Note"]
-    message: str = Field(description="One or two sentences in plain English")
-    suggestion: str = Field(description="What the user could change or clarify")
-
-
 class AnswerReview(BaseModel):
-    summary: str = Field(
-        description="One or two sentences: are the answers coherent and complete enough for the analysis?"
-    )
-    issues: list[AnswerIssue] = Field(
-        description="Zero to five issues, most important first. Empty if there are none."
-    )
-    clarifying_questions: list[str] = Field(
-        description="Zero to three questions whose answers would most improve the analysis"
+    inconsistencies: list[str] = Field(
+        description="Zero to five short items, most important first. Empty if the answers are consistent."
     )
 
+    @model_validator(mode="after")
+    def _check_items(self):
+        if len(self.inconsistencies) > 5:
+            raise ValueError("return at most five inconsistencies")
+        self.inconsistencies = [i.strip() for i in self.inconsistencies if i.strip()]
+        return self
 
-REVIEW_SYSTEM = """You review the answers a user gave on an intake form about an Australian \
+
+REVIEW_SYSTEM = """You check the answers a user gave on an intake form about an Australian \
 construction project, before a tool compares project delivery methods for them. You are not \
-giving legal advice and you must not recommend a delivery method yet.
+giving legal advice and you must not recommend a delivery method.
 
-Look for:
-- Inconsistencies between answers (for example wanting full design control while accepting \
-fast-tracking, or a fixed budget while expecting significant design changes).
-- Gaps: things that matter for choosing a delivery method but are missing or look like untouched \
-defaults (for example complexity drivers selected while overall complexity is Low).
-- Anything in the free-text stakeholder notes that the other answers don't reflect.
+Your only job is to list inconsistencies: pairs of answers that pull against each other. For \
+example, wanting full design control while accepting fast-tracking, or a fixed budget while \
+expecting significant design changes. Also include anything in the free-text stakeholder notes \
+that contradicts the other answers.
 
-Be specific and brief. Do not invent facts about the project. If the answers are coherent, say so \
-and return an empty list of issues."""
+Rules:
+- Write each item as one short sentence (about 20 words at most) that names the two answers that \
+conflict, in plain English.
+- Do not list gaps, missing information, suggestions, advice or questions.
+- Do not invent facts about the project, and do not flag a combination that is merely unusual.
+- Maximum five items, most important first. If the answers are consistent, return an empty list."""
 
 
 def review_brief(brief: dict, api_key: str) -> AnswerReview:

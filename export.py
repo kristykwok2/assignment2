@@ -1,11 +1,3 @@
-"""Build the downloadable summary in three formats: Word (.docx), HTML and Markdown.
-
-The AI writes the wording (see advice_ai.Summary). The risk-matrix table in the download is
-built here from the matrix data, so its numbers are never AI-written text.
-
-No Streamlit imports here, so this module can be unit-tested on its own.
-"""
-
 import datetime
 import html
 import io
@@ -13,16 +5,8 @@ import io
 from advice_ai import DISCLAIMER, ContractNotes, Recommendation, Summary
 from risk_matrix import RiskMatrix, build_tables
 
-# Colours for risk scores 1 (low risk) to 5 (high risk). Also used by the on-screen matrix.
 RISK_PALETTE = {1: "#c8e6c9", 2: "#e6f2c2", 3: "#fff3b0", 4: "#ffd699", 5: "#f4a6a6"}
 
-
-# ---------------------------------------------------------------------------
-# Format-neutral document description
-# ---------------------------------------------------------------------------
-# A document is a list of blocks:
-#   ("title", text) ("meta", text) ("h2", text) ("p", text) ("ul", [text, ...]) ("note", text)
-#   ("table", headers, rows)   where each row is a list of (text, score_or_None)
 Block = tuple
 
 
@@ -80,10 +64,6 @@ def _score_colour(score) -> str | None:
         return None
     return RISK_PALETTE[min(5, max(1, int(round(score))))]
 
-
-# ---------------------------------------------------------------------------
-# Renderers
-# ---------------------------------------------------------------------------
 def to_markdown(blocks: list[Block]) -> str:
     out: list[str] = []
     for block in blocks:

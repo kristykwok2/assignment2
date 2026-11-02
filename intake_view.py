@@ -1,5 +1,3 @@
-"""Streamlit sections for Step 1 (your project) and Step 2 (check your answers)."""
-
 import json
 from dataclasses import fields
 
@@ -27,7 +25,6 @@ def _key(name: str) -> str:
 
 
 def _init_defaults() -> None:
-    # Giving every widget a session-state key lets the AI fill them in (AI call 1).
     for name, value in ProjectBrief().to_dict().items():
         st.session_state.setdefault(_key(name), value)
 
@@ -48,11 +45,9 @@ def _fill_from_description() -> None:
             st.error(f"Something went wrong filling in the form: {exc}")
             return
 
-    # This runs before the form widgets are created in this script run, so setting
-    # their session-state values here is allowed and they will show the new answers.
     for name, value in intake_to_brief(result).to_dict().items():
         st.session_state[_key(name)] = value
-    st.session_state.brief = None  # the user must check and save the new answers
+    st.session_state.brief = None  
     st.session_state.intake_notes = list(result.assumptions)
 
 
@@ -88,7 +83,6 @@ def render_intake() -> ProjectBrief | None:
             st.info("The AI filled in the form below. Please check the answers before saving.")
 
     with st.form("objectives_form"):
-        # 1. TIMING -----------------------------------------------------------
         st.subheader("1. Timing")
         st.select_slider(
             "How important is early or on-time completion?",
@@ -103,7 +97,6 @@ def render_intake() -> ProjectBrief | None:
             key=_key("fast_track_acceptable"),
         )
 
-        # 2. COST -------------------------------------------------------------
         st.subheader("2. Cost")
         st.select_slider(
             "How important is price certainty before construction starts?",
@@ -115,7 +108,6 @@ def render_intake() -> ProjectBrief | None:
             "Achieving the lowest competitive price is a priority", key=_key("lowest_price_priority")
         )
 
-        # 3. CONTROL OVER DESIGN ----------------------------------------------
         st.subheader("3. Control over design")
         st.select_slider(
             "How much control do you want over design details?",
@@ -127,7 +119,6 @@ def render_intake() -> ProjectBrief | None:
             key=_key("design_changes_expected"),
         )
 
-        # 4. EXPERIENCE OF THE PRINCIPAL --------------------------------------
         st.subheader("4. Experience of the principal")
         st.select_slider(
             "How experienced is the principal with construction projects?",
@@ -139,7 +130,6 @@ def render_intake() -> ProjectBrief | None:
             key=_key("in_house_project_management"),
         )
 
-        # 5. OTHER STAKEHOLDERS -----------------------------------------------
         st.subheader("5. Other stakeholders")
         st.multiselect(
             "Which other stakeholders have an interest in the project?",
@@ -152,7 +142,6 @@ def render_intake() -> ProjectBrief | None:
             key=_key("stakeholder_notes"),
         )
 
-        # 6. PROJECT COMPLEXITY -----------------------------------------------
         st.subheader("6. Project complexity")
         st.select_slider("Overall project complexity", options=COMPLEXITY, key=_key("complexity_level"))
         st.multiselect(
@@ -188,15 +177,12 @@ def render_review(brief: ProjectBrief) -> None:
     """Step 2. Rule-based warnings, plus an AI review (AI call 2) on request."""
     st.header("Step 2: Check your answers")
 
-    for problem in validate(brief):
-        st.warning(problem)
+    for problem in validate(brief):  
+        st.markdown(f"⚠️ {problem}")
 
     brief_dict = brief.to_dict()
     key = make_key(brief_dict)
 
-    # AI call 2 runs by itself whenever there are saved answers it hasn't reviewed yet.
-    # A failure is remembered for these answers so the page doesn't retry on every click;
-    # the user retries with the button instead.
     review = cached("review", key)
     failure = cached("review_error", key)
     retry = st.button("Try the AI review again") if failure else False
@@ -214,7 +200,7 @@ def render_review(brief: ProjectBrief) -> None:
                 failure = str(exc)
                 store("review_error", key, failure)
         if retry and review is not None:
-            st.rerun()  # redraw without the retry button
+            st.rerun()  
 
     if review is None:
         st.warning(
@@ -222,18 +208,9 @@ def render_review(brief: ProjectBrief) -> None:
         )
         return
 
-    st.write(review.summary)
-    for issue in review.issues:
-        text = f"**{issue.kind}:** {issue.message}\n\n*Suggestion:* {issue.suggestion}"
-        if issue.kind == "Note":
-            st.info(text)
-        else:
-            st.warning(text)
-    if not review.issues:
-        st.success("No problems found.")
-    if review.clarifying_questions:
-        st.markdown("**Questions worth thinking about**")
-        for question in review.clarifying_questions:
-            st.markdown(f"- {question}")
-    if review.issues or review.clarifying_questions:
+    for item in review.inconsistencies:
+        st.markdown(f"⚠️ {item}")
+    if review.inconsistencies:
         st.caption("To change an answer, edit the form in Step 1 and save again.")
+    elif not validate(brief):
+        st.success("No inconsistencies found.")

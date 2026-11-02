@@ -1,5 +1,3 @@
-"""Small Streamlit helpers shared by the page sections."""
-
 import hashlib
 import json
 

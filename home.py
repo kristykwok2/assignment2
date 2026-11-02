@@ -1,18 +1,3 @@
-"""Project Delivery Method Selector (Australian construction law).
-
-Run locally with:  streamlit run home.py
-
-Flow (each step builds on the one before):
-  1. Your project        - describe it for an AI form fill (AI call 1), then save your answers
-  2. Check your answers  - AI review runs automatically on save (AI call 2)
-  3. Risk matrix         - AI weights and rates each method (call 3), then an automatic
-                           second-opinion check of the ratings (call 4)
-  4. Recommendation      - ranked recommendation (call 5), contract notes (call 6) and
-                           risk mitigation ideas (call 7)
-  5. Ask a question      - follow-up Q&A about the results (AI call 9)
-  6. Download a summary  - one-page summary as Word/HTML/Markdown (AI call 10)
-"""
-
 import streamlit as st
 
 from advice_view import render_advice
@@ -27,7 +12,6 @@ st.caption(
     "for an Australian construction project. This tool is an educational aid and is not legal advice."
 )
 
-# --- API key (required assignment snippet) ----------------------------------
 if "openai_api_key" not in st.session_state:
     st.session_state.openai_api_key = None
 
@@ -37,8 +21,6 @@ def render_api_key_input():
     update_button = st.sidebar.button("Update API Key")
     return api_key_input, update_button
 
-# Save the key when the button is clicked. It is kept only in this browser session's
-# memory (never written to disk or committed to GitHub).
 api_key_input, update_button = render_api_key_input()
 if update_button:
     if api_key_input.strip():
@@ -49,17 +31,16 @@ if st.session_state.openai_api_key:
     st.sidebar.success("API key set for this session.")
 else:
     st.sidebar.info("Your key is needed for the AI steps.")
-# ---------------------------------------------------------------------------
 
-brief = render_intake()  # Step 1 (AI call 1)
+brief = render_intake()  
 
 if brief is not None:
     st.divider()
-    render_review(brief)  # Step 2 (AI call 2)
+    render_review(brief)  
 
     st.divider()
-    render_risk_matrix(brief)  # Step 3 (AI call 3)
+    render_risk_matrix(brief) 
 
     matrix = st.session_state.get("matrix")
     if matrix is not None:
-        render_advice(brief, matrix)  # Steps 4-6 (AI calls 5, 6, 9, 10)
+        render_advice(brief, matrix)  

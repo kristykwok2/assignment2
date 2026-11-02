@@ -24,35 +24,25 @@ COMPLEXITY_DRIVERS = [
     "Design likely to change during delivery",
 ]
 
-
-# ---------------------------------------------------------------------------
-# Data model for the user's answers
-# ---------------------------------------------------------------------------
 @dataclass
 class ProjectBrief:
-    # 1. Timing
     timing_importance: str = "Medium"
     fixed_completion_date: bool = False
     fast_track_acceptable: bool = False  # can construction start before design is finished?
 
-    # 2. Cost
     cost_certainty_importance: str = "Medium"
     budget_fixed: bool = False
     lowest_price_priority: bool = False
 
-    # 3. Control over design
     design_control_desired: str = "Some"
     design_changes_expected: bool = False
 
-    # 4. Experience of the principal
     principal_experience: str = "Limited"
     in_house_project_management: bool = False
 
-    # 5. Other stakeholders
     stakeholder_types: list = field(default_factory=list)
     stakeholder_notes: str = ""
 
-    # 6. Project complexity
     complexity_level: str = "Moderate"
     complexity_drivers: list = field(default_factory=list)
 

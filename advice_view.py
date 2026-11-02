@@ -1,5 +1,3 @@
-"""Streamlit sections for Step 4 (recommendation), Step 5 (ask a question) and Step 6 (download)."""
-
 import streamlit as st
 
 from advice_ai import (
@@ -16,7 +14,6 @@ from ui_common import cached, get_api_key, make_key, store
 
 
 def _generate_notes(brief_dict, matrix, method, api_key, rec_key) -> None:
-    """AI call 6, run for the top-ranked method."""
     with st.spinner(f"Preparing contract notes for {method}..."):
         try:
             store("contract_notes", rec_key, generate_contract_notes(brief_dict, matrix, method, api_key))
@@ -25,7 +22,6 @@ def _generate_notes(brief_dict, matrix, method, api_key, rec_key) -> None:
 
 
 def _generate_mitigation(brief_dict, matrix, method, api_key, rec_key) -> None:
-    """AI call 7, run for the top-ranked method."""
     with st.spinner(f"Finding ways to reduce the main risks of {method}..."):
         try:
             store("mitigation", rec_key, generate_mitigation(brief_dict, matrix, method, api_key))
@@ -37,7 +33,6 @@ def render_advice(brief, matrix: RiskMatrix) -> None:
     brief_dict = brief.to_dict()
     ctx = make_key(brief_dict, matrix.model_dump())  # changes whenever answers or matrix change
 
-    # ===== Step 4: recommendation + contract notes ==========================
     st.divider()
     st.header("Step 4: Recommendation")
 
@@ -67,7 +62,6 @@ def render_advice(brief, matrix: RiskMatrix) -> None:
 
     mitigation = cached("mitigation", rec_key)
 
-    # Only the headline and the ranking show at first. Everything else opens on click.
     st.markdown(f"### {rec.headline}")
     st.caption("Click a method to see why it suits you and its main drawback.")
     for i, ranked in enumerate(rec.ranked, start=1):
@@ -120,7 +114,6 @@ def render_advice(brief, matrix: RiskMatrix) -> None:
             st.caption(notes.check_before_relying)
     st.caption(DISCLAIMER)
 
-    # ===== Step 5: follow-up questions =======================================
     st.divider()
     st.header("Step 5: Ask a question")
     st.caption(
@@ -128,9 +121,6 @@ def render_advice(brief, matrix: RiskMatrix) -> None:
         "control? What would change if the budget weren't fixed?"
     )
 
-    # Two containers fix the on-screen order: the conversation first, the question box under
-    # it. st.chat_input is only pinned to the bottom of the screen when it sits directly on
-    # the page; inside a container it stays here, under the Step 5 heading.
     conversation_box = st.container()
     input_box = st.container()
     with input_box:
@@ -162,7 +152,6 @@ def render_advice(brief, matrix: RiskMatrix) -> None:
                         st.markdown(answer)
                         store("chat", rec_key, new_history + [{"role": "assistant", "content": answer}])
 
-    # ===== Step 6: download summary ==========================================
     st.divider()
     st.header("Step 6: Download a summary")
 

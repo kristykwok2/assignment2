@@ -25,7 +25,6 @@ DISCLAIMER = (
     "the actual contract documents, current standard forms and the law in your jurisdiction."
 )
 
-# Rules repeated in every system prompt so the model stays within what the tool can support.
 _COMMON_RULES = """General rules:
 - This is an educational tool, not legal advice. Write in plain English for a principal who is \
 not a lawyer.
@@ -34,10 +33,6 @@ not a lawyer.
 - Do not invent facts about the user's project. Use their answers.
 - The project's jurisdiction within Australia is not specified, so keep legal points general."""
 
-
-# ---------------------------------------------------------------------------
-# Helpers that turn the matrix into text for prompts (pure Python, no AI)
-# ---------------------------------------------------------------------------
 def matrix_to_text(matrix: RiskMatrix, include_rationale: bool = False) -> str:
     risk, weights, weighted = build_tables(matrix)
     reasons = {w.criterion: w.reason for w in matrix.weights}
@@ -71,10 +66,6 @@ def highest_risk_criteria(matrix: RiskMatrix, method: str, n: int = 2) -> list[t
     row = risk.loc[method].sort_values(ascending=False, kind="stable")
     return [(criterion, int(value)) for criterion, value in row.head(n).items()]
 
-
-# ---------------------------------------------------------------------------
-# Call 4: second-opinion check of the matrix
-# ---------------------------------------------------------------------------
 class RatingFlag(BaseModel):
     method: str
     criterion: str
@@ -131,15 +122,10 @@ def generate_matrix_check(brief: dict, matrix: RiskMatrix, api_key: str) -> Matr
         f"{matrix_to_text(matrix, include_rationale=True)}"
     )
     check = structured_call(api_key, CHECK_SYSTEM, user, MatrixCheck, max_tokens=2500)
-    # Drop flags that agree with the matrix (the reviewer sometimes suggests the same number).
     risk, _, _ = build_tables(matrix)
     check.flags = [f for f in check.flags if int(risk.loc[f.method, f.criterion]) != f.suggested_risk]
     return check
 
-
-# ---------------------------------------------------------------------------
-# Call 5: recommendation
-# ---------------------------------------------------------------------------
 class RankedMethod(BaseModel):
     method: str
     why_it_suits: str = Field(description="2-3 sentences in plain English, tied to the user's answers")
@@ -187,10 +173,6 @@ def generate_recommendation(brief: dict, matrix: RiskMatrix, api_key: str) -> Re
     )
     return structured_call(api_key, RECOMMEND_SYSTEM, user, Recommendation, max_tokens=3000)
 
-
-# ---------------------------------------------------------------------------
-# Call 6: contract notes for the top method
-# ---------------------------------------------------------------------------
 class ClauseTopic(BaseModel):
     topic: str = Field(description="Short name of the contract topic, e.g. 'Latent conditions'")
     why_it_matters: str = Field(description="1-2 sentences on why it matters under this delivery method")
@@ -242,10 +224,6 @@ def generate_contract_notes(brief: dict, matrix: RiskMatrix, method: str, api_ke
     notes.method = method  # make sure the label always matches what we asked about
     return notes
 
-
-# ---------------------------------------------------------------------------
-# Call 7: ways to reduce the top method's highest risks
-# ---------------------------------------------------------------------------
 class MitigationItem(BaseModel):
     criterion: str
     actions: list[str] = Field(description="Two or three practical actions, one short sentence each")
@@ -290,7 +268,6 @@ def generate_mitigation(brief: dict, matrix: RiskMatrix, method: str, api_key: s
     )
     result = structured_call(api_key, MITIGATION_SYSTEM, user, Mitigation, max_tokens=2500)
     result.method = method
-    # Keep only the objectives we asked about, in the order we asked.
     by_criterion = {i.criterion: i for i in result.items}
     result.items = [by_criterion[c] for c, _ in focus if c in by_criterion]
     if not result.items:
@@ -307,10 +284,6 @@ def mitigation_to_text(mitigation: "Mitigation | None") -> str:
     lines.append(mitigation.residual_note)
     return "\n".join(lines)
 
-
-# ---------------------------------------------------------------------------
-# Call 9: follow-up questions
-# ---------------------------------------------------------------------------
 CHAT_SYSTEM_TEMPLATE = """You answer follow-up questions from a principal about the results of an \
 educational tool that compares project delivery methods for an Australian construction project. \
 Everything the tool produced is below. Ground your answers in it.
@@ -388,10 +361,6 @@ def answer_question(
     )
     return chat_call(api_key, system, history[-MAX_HISTORY_MESSAGES:])
 
-
-# ---------------------------------------------------------------------------
-# Call 10: downloadable summary
-# ---------------------------------------------------------------------------
 class Summary(BaseModel):
     title: str = Field(description="A short title such as 'Delivery method summary: <project type>'")
     project_overview: str = Field(description="2-3 sentences describing the project and its priorities")
@@ -419,7 +388,6 @@ def generate_summary(
     api_key: str,
     mitigation: "Mitigation | None" = None,
 ) -> Summary:
-    """AI call 10: structured one-page summary."""
     user = (
         f"THE USER'S ANSWERS (JSON):\n{json.dumps(brief, indent=2)}\n\n"
         f"{matrix_to_text(matrix)}\n\n"

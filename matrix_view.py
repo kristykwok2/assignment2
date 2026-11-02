@@ -49,7 +49,6 @@ def render_risk_matrix(brief) -> None:
     brief_dict = brief.to_dict()
     brief_key = json.dumps(brief_dict, sort_keys=True)
 
-    # Throw away an old matrix if the user has changed their answers.
     if st.session_state.get("matrix_key") != brief_key:
         st.session_state.pop("matrix", None)
 
@@ -77,7 +76,6 @@ def render_risk_matrix(brief) -> None:
     styled, weights, weighted = _matrix_table(matrix)
     check_key = make_key(brief_dict, matrix.model_dump())
 
-    # --- The matrix (first thing the user sees) ------------------------------
     st.dataframe(styled, width="stretch")
     st.caption(
         "Risk to you as principal: 1 = low (green), 5 = high (red). Lower is better, and methods "
@@ -89,7 +87,6 @@ def render_risk_matrix(brief) -> None:
         f"Highest: **{weighted.index[-1]}** ({weighted.iloc[-1]:.1f})."
     )
 
-    # --- Second-opinion check (AI call 4) -------------------------------------
     check = cached("matrix_check", check_key)
     if check is None:
         if st.button("Run the second-opinion check"):  # only appears if the automatic check failed
@@ -118,7 +115,6 @@ def render_risk_matrix(brief) -> None:
                 "decide whether to agree with any flag."
             )
 
-    # --- Detail, collapsed ---------------------------------------------------
     with st.expander("Why were the objectives weighted this way?"):
         st.dataframe(
             pd.DataFrame(
