@@ -1,3 +1,5 @@
+"""Streamlit sections for Step 1 (your project) and Step 2 (check your answers)."""
+
 import json
 from dataclasses import fields
 
@@ -25,6 +27,7 @@ def _key(name: str) -> str:
 
 
 def _init_defaults() -> None:
+    # Giving every widget a session-state key lets the AI fill them in (AI call 1).
     for name, value in ProjectBrief().to_dict().items():
         st.session_state.setdefault(_key(name), value)
 
@@ -44,7 +47,6 @@ def _fill_from_description() -> None:
         except Exception as exc:
             st.error(f"Something went wrong filling in the form: {exc}")
             return
-
     for name, value in intake_to_brief(result).to_dict().items():
         st.session_state[_key(name)] = value
     st.session_state.brief = None  
@@ -173,6 +175,21 @@ def render_intake() -> ProjectBrief | None:
     return brief
 
 
+def _cell(text: str) -> str:
+    """Make text safe to put in one cell of a markdown table."""
+    return " ".join(text.split()).replace("|", "\\|")
+
+
+def _inconsistency_table(items) -> str:
+    """The AI's inconsistencies as a three-column markdown table, each marked with a warning sign."""
+    lines = ["| Inconsistency | Explanation | Potential fix |", "|---|---|---|"]
+    for item in items:
+        lines.append(
+            f"| ⚠️ {_cell(item.conflict)} | {_cell(item.why_it_matters)} | {_cell(item.potential_fix)} |"
+        )
+    return "\n".join(lines)
+
+
 def render_review(brief: ProjectBrief) -> None:
     """Step 2. Rule-based warnings, plus an AI review (AI call 2) on request."""
     st.header("Step 2: Check your answers")
@@ -208,9 +225,8 @@ def render_review(brief: ProjectBrief) -> None:
         )
         return
 
-    for item in review.inconsistencies:
-        st.markdown(f"⚠️ {item}")
     if review.inconsistencies:
+        st.markdown(_inconsistency_table(review.inconsistencies))
         st.caption("To change an answer, edit the form in Step 1 and save again.")
     elif not validate(brief):
         st.success("No inconsistencies found.")

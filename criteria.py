@@ -67,3 +67,25 @@ def validate(brief: ProjectBrief) -> list[str]:
             "You have a fixed budget but rated cost certainty importance as Low."
         )
     return problems
+
+QUESTION_LABELS = {
+    "timing_importance": "Timing",
+    "fixed_completion_date": "Timing",
+    "fast_track_acceptable": "Timing",
+
+    "cost_certainty_importance": "Cost",
+    "budget_fixed": "Cost",
+    "lowest_price_priority": "Cost",
+
+    "design_control_desired": "Control over design",
+    "design_changes_expected": "Control over design",
+
+    "principal_experience": "Experience of the principal",
+    "in_house_project_management": "Experience of the principal",
+
+    "stakeholder_types": "Other stakeholders",
+    "stakeholder_notes": "Other stakeholders",
+
+    "complexity_level": "Project complexity",
+    "complexity_drivers": "Project complexity",
+}

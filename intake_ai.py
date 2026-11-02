@@ -12,15 +12,15 @@ from criteria import (
     EXPERIENCE,
     IMPORTANCE,
     STAKEHOLDER_TYPES,
+    QUESTION_LABELS,
     ProjectBrief,
 )
-
-ImportanceT = Literal[tuple(IMPORTANCE)]  
-ControlT = Literal[tuple(CONTROL)] 
-ExperienceT = Literal[tuple(EXPERIENCE)]  
-ComplexityT = Literal[tuple(COMPLEXITY)]  
-StakeholderT = Literal[tuple(STAKEHOLDER_TYPES)]  
-DriverT = Literal[tuple(COMPLEXITY_DRIVERS)] 
+ImportanceT = Literal[tuple(IMPORTANCE)]  # type: ignore[valid-type]
+ControlT = Literal[tuple(CONTROL)]  # type: ignore[valid-type]
+ExperienceT = Literal[tuple(EXPERIENCE)]  # type: ignore[valid-type]
+ComplexityT = Literal[tuple(COMPLEXITY)]  # type: ignore[valid-type]
+StakeholderT = Literal[tuple(STAKEHOLDER_TYPES)]  # type: ignore[valid-type]
+DriverT = Literal[tuple(COMPLEXITY_DRIVERS)]  # type: ignore[valid-type]
 
 class IntakeResult(BaseModel):
     """Mirrors ProjectBrief field-for-field, plus a list of assumptions."""
@@ -79,16 +79,27 @@ def intake_to_brief(result: IntakeResult) -> ProjectBrief:
     """Copy the form-answer fields of an IntakeResult into a ProjectBrief."""
     return ProjectBrief(**{f.name: getattr(result, f.name) for f in fields(ProjectBrief)})
 
+class Inconsistency(BaseModel):
+    conflict: str = Field(description="One short sentence naming the two answers that conflict")
+    why_it_matters: str = Field(
+        description="One or two sentences on why this matters when choosing a delivery method"
+    )
+    potential_fix: str = Field(
+        description="One sentence on how the user could resolve it, by deciding which matters more "
+        "or changing one of the two answers"
+    )
+
+
 class AnswerReview(BaseModel):
-    inconsistencies: list[str] = Field(
-        description="Zero to five short items, most important first. Empty if the answers are consistent."
+    inconsistencies: list[Inconsistency] = Field(
+        description="Zero to five items, most important first. Empty if the answers are consistent."
     )
 
     @model_validator(mode="after")
     def _check_items(self):
         if len(self.inconsistencies) > 5:
             raise ValueError("return at most five inconsistencies")
-        self.inconsistencies = [i.strip() for i in self.inconsistencies if i.strip()]
+        self.inconsistencies = [i for i in self.inconsistencies if i.conflict.strip()]
         return self
 
 
@@ -102,14 +113,45 @@ expecting significant design changes. Also include anything in the free-text sta
 that contradicts the other answers.
 
 Rules:
-- Write each item as one short sentence (about 20 words at most) that names the two answers that \
-conflict, in plain English.
-- Do not list gaps, missing information, suggestions, advice or questions.
-- Do not invent facts about the project, and do not flag a combination that is merely unusual.
-- Maximum five items, most important first. If the answers are consistent, return an empty list."""
-
+- For each item, 'conflict' is one short sentence naming the two answers that conflict,
+  in plain English.
+- 'why_it_matters' is one or two sentences (about 35 words at most) on why the
+  conflict matters when choosing a delivery method.
+- 'potential_fix' must be one short, practical sentence (maximum 25 words).
+- Speak directly to the person completing the form. Always use "you" and "your",
+  never "the user", "the principal" or third-person language.
+- Use simple, everyday English. Avoid academic, legalistic or overly formal language.
+- Make suggestions sound natural and helpful, not like instructions or criticism.
+- Refer to the relevant section using its exact heading from QUESTION_LABELS.
+- Avoid unnecessarily repeating section headings or using phrases like
+  "in the [section] section".
+- Do not use technical terms unless absolutely necessary.
+- When suggesting an answer to change, ALWAYS refer to one of
+  the six user-facing section names supplied in QUESTION_LABELS.
+- Use only these names: Timing, Cost, Control over design,
+  Experience of the principal, Other stakeholders, and Project complexity.
+- NEVER use internal Python field names, JSON keys, variable names
+  or technical identifiers in any user-facing response.
+- Refer to the relevant section by its heading, rather than its
+  individual question or stored field name.
+- Do not list gaps or missing information, and do not ask questions.
+- Do not invent facts about the project, and do not flag a combination that is
+  merely unusual.
+- Maximum five items, most important first. If the answers are consistent,
+  return an empty list."""
 
 def review_brief(brief: dict, api_key: str) -> AnswerReview:
-    """AI call 2: sanity-check the user's answers."""
-    user = f"THE USER'S ANSWERS (JSON):\n{json.dumps(brief, indent=2)}"
-    return structured_call(api_key, REVIEW_SYSTEM, user, AnswerReview, max_tokens=2500)
+    user = (
+        f"USER-FACING QUESTION LABELS:\n"
+        f"{json.dumps(QUESTION_LABELS, indent=2)}\n\n"
+        f"THE USER'S ANSWERS (JSON):\n"
+        f"{json.dumps(brief, indent=2)}"
+    )
+
+    return structured_call(
+        api_key,
+        REVIEW_SYSTEM,
+        user,
+        AnswerReview,
+        max_tokens=2500
+    )
